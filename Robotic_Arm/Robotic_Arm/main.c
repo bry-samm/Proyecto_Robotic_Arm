@@ -11,6 +11,7 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <stdlib.h>
+#include <util/delay.h>
 
 uint8_t		multiplexar_ADC = 0;
 uint8_t		ADC_value;
@@ -34,6 +35,17 @@ uint8_t		cant_modo = 4;
 #define SERVO_MIN_4  9   
 #define SERVO_MAX_4  36   
 
+uint8_t action_button;
+uint8_t ticks_restantes;
+
+// Para guardar datos en el modo 1
+uint8_t entrada = 1;
+uint8_t save_temporal = 0x00;
+
+//Para leer datos en el modo 2 
+uint8_t addr = 0;
+uint8_t pasos = 0;
+# define NUM_MAX_PASOS 4
 //************************************************************************************
 // Function prototypes
 void setup();
@@ -42,8 +54,11 @@ void initPWM0();
 void initPWM1();
 void initUART();
 
+void writeEPROM(uint8_t dato, uint8_t direccion);
+uint8_t readEPROM(uint8_t direccion);
+
 void manual();
-void save_data();
+void reproducir_data();
 void escribir_angulo();
 //************************************************************************************
 // Main Function
@@ -58,7 +73,7 @@ int main(void)
 			break;
 			
 			case 2:
-			save_data();
+			reproducir_data();
 			break;
 			
 			case 3:
@@ -151,20 +166,84 @@ void initUART(){
 	UBRR0 = 12;
 }
 
+
+void writeEPROM(uint8_t dato, uint8_t direccion){
+	// Esperar a que termine la escritura anterior
+	while (EECR & (1 << EEPE));
+	// Asignar dirección de escritura
+	EEAR = direccion;
+	// Asignar dato a "escribir"
+	EEDR = dato;
+	// Setear en 1 el "master write enable"
+	EECR |= (1 << EEMPE);
+	// Empezar a escribir
+	EECR |= (1 << EEPE);
+}
+
+uint8_t readEPROM(uint8_t direccion){
+	// Esperar a que termine la escritura anterior
+	while (EECR & (1 << EEPE));
+	// Asignar dirección de escritura
+	EEAR = direccion;
+	// Empezar a leer
+	EECR |= (1 << EERE);
+	return EEDR;
+}
+
 void manual(){
 	PORTB |= (1 << PORTB3);
 	PORTB &= ~(1 << PORTB4);
 	
 	ADCSRA |= (1 << ADSC);
+	
+	if (entrada == 0){
+		save_temporal = 0x00;
+	}
+
+	if (action_button == 1) {
+
+		//PORTB &= ~(1 << PORTB3);
+		//_delay_ms(3);
+		//PORTB |= (1 << PORTB3);
+		
+		// Guardar en EEPROM
+		writeEPROM(OCR1A, save_temporal++);
+		writeEPROM(OCR1B, save_temporal++);
+		writeEPROM(OCR0A, save_temporal++);
+		writeEPROM(OCR0B, save_temporal++);
+		entrada = 1;
+		action_button = 0;
+	}
+
+
 }
 
-void save_data(){
+void reproducir_data(){
 	PORTB |= (1 << PORTB4);
 	PORTB &= ~(1 << PORTB3);
+	entrada = 0;
+	
+	if (action_button == 1){
+		if (pasos < NUM_MAX_PASOS){
+			OCR1A = readEPROM(addr++);
+			OCR1B = readEPROM(addr++);
+			OCR0A = readEPROM(addr++);
+			OCR0B = readEPROM(addr++);
+
+			pasos++;
+			
+			_delay_ms(100);
+		}
+	}
 }
 
 void escribir_angulo(){
 	PORTB |= (1 << PORTB3) | (1 << PORTB4); // Ambos LEDs
+	pasos= 0;
+	entrada = 0;
+	save_temporal = 0;
+	addr = 0;
+	
 }
 
 //************************************************************************************
@@ -209,8 +288,8 @@ ISR(ADC_vect){
 
 
 #define MAX_BUFFER 20
-volatile char buffer[MAX_BUFFER];
-volatile uint8_t index = 0;
+volatile char buffer[MAX_BUFFER]; // El buffer se encarga de contener los valores recibidos
+volatile uint8_t index = 0; // Tiene el número de caracteres almacenados 
 
 ISR(USART_RX_vect) {
 	
@@ -220,29 +299,34 @@ ISR(USART_RX_vect) {
 
 	// Cuando llega fin de línea (enter)
 	if (recibido == '\n' || recibido == '\r') {
-		buffer[index] = '\0';  // Terminar cadena
+		
+		buffer[index] = '\0';  // Terminar cadena cuando se manda un "enter" el cual es el valor nulo 
 
 		// Variables temporales
 		uint8_t valores[4] = {0};
 		uint8_t val_idx = 0;
 		uint16_t temp = 0;
 
-		for (uint8_t i = 0; i <= index; i++) {
-			char c = buffer[i];
+		for (uint8_t i = 0; i <= index; i++) { // Esto lo que hace es barrer todo el string
+			char c = buffer[i]; // Extrae caracter actual y lo guarda en c 
 
-			if ((c >= '0') && (c <= '9')) {
+		// Iniciamos convirtiendo los caracteres en números, del 0 al 9 
+			if ((c >= '0') && (c <= '9')) { 
 				temp = temp * 10 + (c - '0');
 			}
+		// Manejamos el otro caso, significa que terminó de leer el número 
 			else if (c == ',' || c == '\0') {
+				
+		// Doble verifiación, si la cadena no ha superado los 4 números y si el valor es menor a los 180°
 				if (val_idx < 4) {
 					if (temp > 180) temp = 180; // Límite máximo para servo
-					valores[val_idx++] = temp;
-					temp = 0;
+					valores[val_idx++] = temp; // Guarda el número en el nuevo arreglo e incrementa para guardar el siguiente número 
+					temp = 0; // Reinicia "temp" para empezar a construir y guardar el nuevo número
 				}
 			}
 		}
 
-		// Convertir a OCR valores
+		// Convertir a OCR valores (mismo en en el MUX)
 		OCR1A = SERVO_MIN + (valores[0] * (SERVO_MAX - SERVO_MIN)) / 180;
 		OCR1B = SERVO_MIN_2 + (valores[1] * (SERVO_MAX_2 - SERVO_MIN_2)) / 180;
 		OCR0A = SERVO_MIN_3 + (valores[2] * (SERVO_MAX_3 - SERVO_MIN_3)) / 180;
@@ -250,7 +334,8 @@ ISR(USART_RX_vect) {
 
 		index = 0; // Reiniciar buffer
 	}
-	else {
+	else { 
+		// Esta parte es como un recolector de catacteres 
 		// Acumular caracteres si hay espacio
 		if (index < MAX_BUFFER - 1) {
 			buffer[index++] = recibido;
@@ -266,5 +351,9 @@ ISR(PCINT1_vect) {
 		if (modo >= cant_modo){
 			modo = 1;
 		}
+	} else if (!(PINC & (1 << PORTC1))){
+		action_button = 1;
 	}
 }
+
+
