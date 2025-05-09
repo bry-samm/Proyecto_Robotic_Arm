@@ -12,31 +12,19 @@
 #include <avr/interrupt.h>
 #include <stdlib.h>
 #include <util/delay.h>
+#include "CONF_PWM/CONF_PWM.h"
+#include "CONF_ADC/CONF_ADC.h"
+#include "CONF_UART/CONF_UART.h"
 
-uint8_t		multiplexar_ADC = 0;
-uint8_t		ADC_value;
 
-uint8_t		modo = 1;
-uint8_t		cant_modo = 4;
+uint8_t	multiplexar_ADC = 0;
+uint8_t	ADC_value;
 
-//Valores para primer servo
-#define SERVO_MIN  9   
-#define SERVO_MAX  36 
-
-//Valores para segundo servo
-#define SERVO_MIN_2  9   
-#define SERVO_MAX_2  36  
-
-//Valores para tercer servo
-#define SERVO_MIN_3  9   
-#define SERVO_MAX_3  36  
-
-//Valores para el cuarto servo
-#define SERVO_MIN_4  9   
-#define SERVO_MAX_4  36   
+uint8_t	modo = 1;
+uint8_t	cant_modo = 4;
+ 
 
 uint8_t action_button;
-uint8_t ticks_restantes;
 
 // Para guardar datos en el modo 1
 uint8_t entrada = 1;
@@ -45,14 +33,13 @@ uint8_t save_temporal = 0x00;
 //Para leer datos en el modo 2 
 uint8_t addr = 0;
 uint8_t pasos = 0;
-# define NUM_MAX_PASOS 4
+
+# define NUM_MAX_PASOS 5
+uint8_t cant_posiciones;
+uint8_t modo_repro_iniciado = 0;
 //************************************************************************************
 // Function prototypes
 void setup();
-void initADC();
-void initPWM0();
-void initPWM1();
-void initUART();
 
 void writeEPROM(uint8_t dato, uint8_t direccion);
 uint8_t readEPROM(uint8_t direccion);
@@ -111,61 +98,6 @@ void setup(){
 	sei();
 }
 
-void initPWM1(){
-	DDRB |= (1 << DDB1); // PB1 as output (OC1A)
-	DDRB |= (1 << DDB2); // PB2 as output (OC1B)
-	TCCR1A = 0;
-	TCCR1A |= (1 << COM1A1); // Set as non inverted OC1A
-	TCCR1A |= (1 << COM1B1); // Set as non inverted OC1B
-	TCCR1A |= (1 << WGM10); // Set mode 5 => Fast PWM and top = 0xFF
-	
-	TCCR1B = 0;
-	TCCR1B |= (1 << WGM12);
-	TCCR1B |= (1 << CS11) | (1 << CS10); // Prescaler 64
-}
-
-void initPWM0(){
-	DDRD |= (1 << DDD6); // PD6 as output (OC0A)
-	DDRD |= (1 << DDD5); // PD5 as output (OC0B)
-	TCCR0A = 0;
-	TCCR0A |= (1 << COM0A1); // Set as non inverted OC0A
-	TCCR0A |= (1 << COM0B1); // Set as non inverted OC0B
-	TCCR0A |= (1 << WGM01) | (1 << WGM00); // Set mode 3 => Fast PWM and top = 0xFF
-	
-	TCCR0B = 0;
-	TCCR0B |= (1 << CS01) | (1 << CS00); // Prescaler 64
-}
-
-void initADC(){
-	ADMUX = 0;
-	ADMUX	|= (1<<REFS0);  // 5V as reference
-
-	ADMUX	|= (1 << ADLAR); // Left justification
-	
-	ADMUX	|= (1 << MUX1) | (1<< MUX0); //Select ADC3 to have a start value
-	
-	ADCSRA	= 0;
-	ADCSRA	|= (1 << ADPS1) | (1 << ADPS0); // Sampling frequency = 125kHz "sampling = muestreo"
-	ADCSRA	|= (1 << ADIE); // Enable interruption
-	ADCSRA	|= (1 << ADEN); // Enable ADC
-	
-	ADCSRA	|= (1<< ADSC); // Start conversion
-}
-
-void initUART(){
-	//Step1 : configurate pin PD0 (rx) and PD1 (tx)
-	DDRD |= (1 << DDD1);
-	DDRD &= ~(1 << DDD0);
-	//Step 2: UCSR0A
-	UCSR0A |= (1 << U2X0); //double speed
-	//Step 3: UCSR0B: enable interrupts, enable recibir, enable transmition
-	UCSR0B |= (1 << RXCIE0) | (1 << RXEN0) | (1 << TXEN0);
-	//Step 4 : UCSR0C
-	UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
-	//Step 5: UBRR0 0 103 => 9600 16kHz
-	UBRR0 = 12;
-}
-
 
 void writeEPROM(uint8_t dato, uint8_t direccion){
 	// Esperar a que termine la escritura anterior
@@ -199,43 +131,56 @@ void manual(){
 	if (entrada == 0){
 		save_temporal = 0x00;
 	}
+	if (entrada == 0 && action_button == 1){
+		cant_posiciones = 0;
+	}
 
-	if (action_button == 1) {
+	if (action_button == 1 && cant_posiciones < NUM_MAX_PASOS) {
+		PORTB &= ~(1 << PORTB3);
+		_delay_ms(3);
+		PORTB |= (1 << PORTB3);
 
-		//PORTB &= ~(1 << PORTB3);
-		//_delay_ms(3);
-		//PORTB |= (1 << PORTB3);
-		
-		// Guardar en EEPROM
 		writeEPROM(OCR1A, save_temporal++);
 		writeEPROM(OCR1B, save_temporal++);
 		writeEPROM(OCR0A, save_temporal++);
 		writeEPROM(OCR0B, save_temporal++);
 		entrada = 1;
 		action_button = 0;
+		cant_posiciones++;
 	}
-
-
 }
 
-void reproducir_data(){
+
+void reproducir_data() {
 	PORTB |= (1 << PORTB4);
 	PORTB &= ~(1 << PORTB3);
 	entrada = 0;
-	
-	if (action_button == 1){
-		if (pasos < NUM_MAX_PASOS){
+
+	if (!modo_repro_iniciado && action_button == 1) {
+		addr = 0;
+		pasos = 0;
+		modo_repro_iniciado = 1;
+		action_button = 0; // Consumir el botón
+	}
+
+	// Ejecutar solo si se inició el modo de reproducción
+	if (modo_repro_iniciado) {
+		if (pasos < cant_posiciones) {
 			OCR1A = readEPROM(addr++);
 			OCR1B = readEPROM(addr++);
 			OCR0A = readEPROM(addr++);
 			OCR0B = readEPROM(addr++);
-
-			pasos++;
 			
-			_delay_ms(100);
+			pasos++;
+			_delay_ms(100); // Tiempo entre pasos
+			} else {
+			// Se completó la reproducción
+			modo_repro_iniciado = 0;
 		}
 	}
 }
+
+
 
 void escribir_angulo(){
 	PORTB |= (1 << PORTB3) | (1 << PORTB4); // Ambos LEDs
@@ -243,6 +188,8 @@ void escribir_angulo(){
 	entrada = 0;
 	save_temporal = 0;
 	addr = 0;
+	
+	modo_repro_iniciado = 0;
 	
 }
 
@@ -257,14 +204,14 @@ ISR(ADC_vect){
 	ADC_value = ADCH;
 	if (multiplexar_ADC == 3){
 		uint8_t angle = (ADC_value * 180) / 255;
-		OCR1A = SERVO_MIN + (angle * (SERVO_MAX - SERVO_MIN) / 180);
+		OCR1B = SERVO_MIN + (angle * (SERVO_MAX - SERVO_MIN) / 180);
 		// Change ADC
 		ADMUX = (ADMUX & 0xF0) | 4; // I made the "&" with 0xF0 because in the high bits are the configuration of the MUX and i want to save this values
 	}
 	else if (multiplexar_ADC == 4)
 	{
 		uint8_t angle2 = (ADC_value * 180) / 255;
-		OCR1B = SERVO_MIN_2 + (angle2 * (SERVO_MAX_2 - SERVO_MIN_2) / 180);
+		OCR1A = SERVO_MIN_2 + (angle2 * (SERVO_MAX_2 - SERVO_MIN_2) / 180);
 		// Change ADC
 		ADMUX = (ADMUX & 0xF0) | 5; // I do not write ADMUX |= (ADMUX & 0xF0) | 3; because y want to erase de prevous configuration of the MUX ###################
 	}
@@ -273,7 +220,7 @@ ISR(ADC_vect){
 		uint8_t angle3 = (ADC_value * 180) / 255;
 		OCR0A = SERVO_MIN_3 + (angle3 * (SERVO_MAX_3 - SERVO_MIN_3) / 180);
 		// Change ADC
-		ADMUX = (ADMUX & 0xF0) | 6; 
+		ADMUX = (ADMUX & 0xF0) | 6;
 	}
 	else if (multiplexar_ADC == 6){
 		
@@ -285,6 +232,8 @@ ISR(ADC_vect){
 
 	ADCSRA |= (1 << ADSC); // Start new conversion
 }
+
+
 
 
 #define MAX_BUFFER 20
