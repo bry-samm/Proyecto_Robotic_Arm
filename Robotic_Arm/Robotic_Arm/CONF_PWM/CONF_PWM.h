@@ -5,10 +5,11 @@
  *  Author: bsmor
  */ 
 
-
 #ifndef CONF_PWM_H_
 #define CONF_PWM_H_
 
+//==================================================================================================
+/*
 //Valores para primer servo (base)
 #define SERVO_MIN  9
 #define SERVO_MAX  36
@@ -24,9 +25,9 @@
 //Valores para el cuarto servo (garra)
 #define SERVO_MIN_4  20
 #define SERVO_MAX_4  36
-
+*/
 //========================================================= BRYAN ======================================================
-/*
+
 //Valores para primer servo (base)
 #define SERVO_MIN  9
 #define SERVO_MAX  36
@@ -36,13 +37,13 @@
 #define SERVO_MAX_2  36
 
 //Valores para tercer servo (brazo)
-#define SERVO_MIN_3  11
-#define SERVO_MAX_3  39
+#define SERVO_MIN_3  10
+#define SERVO_MAX_3  37
 
 //Valores para el cuarto servo (garra)
 #define SERVO_MIN_4  20
 #define SERVO_MAX_4  36
-*/
+
 
 
 void initPWM0();

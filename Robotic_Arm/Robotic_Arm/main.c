@@ -196,43 +196,56 @@ void escribir_angulo(){
 //************************************************************************************
 // Interrupt subroutines
 
-ISR(ADC_vect){
-	
-	if (modo != 1) return; // Solo ejecutar si estamos en modo manual
-	
-	multiplexar_ADC = ADMUX & 0x0F; //Create a mask
-	ADC_value = ADCH;
-	if (multiplexar_ADC == 3){
-		uint8_t angle = (ADC_value * 180) / 255;
-		OCR1B = SERVO_MIN + (angle * (SERVO_MAX - SERVO_MIN) / 180);
-		// Change ADC
-		ADMUX = (ADMUX & 0xF0) | 4; // I made the "&" with 0xF0 because in the high bits are the configuration of the MUX and i want to save this values
-	}
-	else if (multiplexar_ADC == 4)
-	{
-		uint8_t angle2 = (ADC_value * 180) / 255;
-		OCR1A = SERVO_MIN_2 + (angle2 * (SERVO_MAX_2 - SERVO_MIN_2) / 180);
-		// Change ADC
-		ADMUX = (ADMUX & 0xF0) | 5; // I do not write ADMUX |= (ADMUX & 0xF0) | 3; because y want to erase de prevous configuration of the MUX ###################
-	}
-	else if (multiplexar_ADC == 5){
+ISR(ADC_vect) {
+	if (modo != 1) return;
 
-		uint8_t angle3 = (ADC_value * 180) / 255;
-		OCR0A = SERVO_MIN_3 + (angle3 * (SERVO_MAX_3 - SERVO_MIN_3) / 180);
-		// Change ADC
+	uint8_t adc_channel = ADMUX & 0x0F;
+	uint8_t adc_value = ADCH; // Valor ADC de 8 bits (0-255)
+	uint8_t angle;
+	
+	// Canal ADC4 requiere inversión del valor
+	if (adc_channel == 4) {
+		adc_value = 255 - adc_value;
+	}
+
+	// Escalar el rango útil del potenciómetro (0-127) -> 0-180° del servo
+	if (adc_value <= 127) {
+		angle = (adc_value * 180UL) / 127;
+		} else {
+		angle = 180;
+	}
+
+	// Calcular el pulso PWM para el servo
+	uint16_t servo_pulse;
+
+	switch(adc_channel) {
+		case 3: // Canal ADC3 -> Servo 1
+		servo_pulse = SERVO_MIN + (angle * (SERVO_MAX - SERVO_MIN)) / 180;
+		OCR1B = (uint16_t)servo_pulse;
+		ADMUX = (ADMUX & 0xF0) | 4;
+		break;
+
+		case 4: // Canal ADC4 -> Servo 2 (inversión aplicada arriba)
+		servo_pulse = SERVO_MIN_2 + (angle * (SERVO_MAX_2 - SERVO_MIN_2)) / 180;
+		OCR1A = (uint16_t)servo_pulse;
+		ADMUX = (ADMUX & 0xF0) | 5;
+		break;
+
+		case 5: // Canal ADC5 -> Servo 3
+		servo_pulse = SERVO_MIN_3 + (angle * (SERVO_MAX_3 - SERVO_MIN_3)) / 180;
+		OCR0A = (uint16_t)servo_pulse;
 		ADMUX = (ADMUX & 0xF0) | 6;
-	}
-	else if (multiplexar_ADC == 6){
-		
-		uint8_t angle4 = (ADC_value * 180) / 255;
-		OCR0B = SERVO_MIN_4 + (angle4 * (SERVO_MAX_4 - SERVO_MIN_4) / 180);
-		
+		break;
+
+		case 6: // Canal ADC6 -> Servo 4
+		servo_pulse = SERVO_MIN_4 + (angle * (SERVO_MAX_4 - SERVO_MIN_4)) / 180;
+		OCR0B = (uint16_t)servo_pulse;
 		ADMUX = (ADMUX & 0xF0) | 3;
+		break;
 	}
 
-	ADCSRA |= (1 << ADSC); // Start new conversion
+	ADCSRA |= (1 << ADSC); // Iniciar nueva conversión
 }
-
 
 
 
@@ -276,8 +289,8 @@ ISR(USART_RX_vect) {
 		}
 
 		// Convertir a OCR valores (mismo en en el MUX)
-		OCR1A = SERVO_MIN + (valores[0] * (SERVO_MAX - SERVO_MIN)) / 180;
-		OCR1B = SERVO_MIN_2 + (valores[1] * (SERVO_MAX_2 - SERVO_MIN_2)) / 180;
+		OCR1B = SERVO_MIN + (valores[0] * (SERVO_MAX - SERVO_MIN)) / 180;
+		OCR1A = SERVO_MIN_2 + (valores[1] * (SERVO_MAX_2 - SERVO_MIN_2)) / 180;
 		OCR0A = SERVO_MIN_3 + (valores[2] * (SERVO_MAX_3 - SERVO_MIN_3)) / 180;
 		OCR0B = SERVO_MIN_4 + (valores[3] * (SERVO_MAX_4 - SERVO_MIN_4)) / 180;
 
