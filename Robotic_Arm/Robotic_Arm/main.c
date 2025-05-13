@@ -17,26 +17,20 @@
 #include "CONF_UART/CONF_UART.h"
 
 
-uint8_t	multiplexar_ADC = 0;
-uint8_t	ADC_value;
+uint8_t	multiplexar_ADC = 0;	// Indica que ADC se está usando 
+uint8_t	ADC_value;				// Guardar valor del ADC
+uint8_t	modo = 1;				// Modo actual
+uint8_t	cant_modo = 4;			// Cantidad de modos +1
+uint8_t action_button;			// Bandera cuando se presiona el botón de ejecutar
+uint8_t entrada = 1;			// Saber si se inició por primera 
+uint8_t save_temporal = 0x00;	// Direcciones de la eprom
 
-uint8_t	modo = 1;
-uint8_t	cant_modo = 4;
- 
+uint8_t addr = 0;				// Direcciones a leer
+uint8_t pasos = 0;				// Pasos ejecutados
 
-uint8_t action_button;
-
-// Para guardar datos en el modo 1
-uint8_t entrada = 1;
-uint8_t save_temporal = 0x00;
-
-//Para leer datos en el modo 2 
-uint8_t addr = 0;
-uint8_t pasos = 0;
-
-# define NUM_MAX_PASOS 5
-uint8_t cant_posiciones;
-uint8_t modo_repro_iniciado = 0;
+# define NUM_MAX_PASOS 5		// Cantidad máxima de posiciones
+uint8_t cant_posiciones;		// Cantidad de posiciones guardadas
+uint8_t modo_repro_iniciado = 0;// Conocer si finalizo de reproducir
 //************************************************************************************
 // Function prototypes
 void setup();
@@ -123,59 +117,65 @@ uint8_t readEPROM(uint8_t direccion){
 }
 
 void manual(){
+	//Mostrar el modo actual 
 	PORTB |= (1 << PORTB3);
 	PORTB &= ~(1 << PORTB4);
 	
 	ADCSRA |= (1 << ADSC);
 	
+	//Esto se ejecuta cuando entra por primera vez al modo manual para reiniciar la dirección
 	if (entrada == 0){
-		save_temporal = 0x00;
+		save_temporal = 0x00; // Reinicia la dirección
 	}
-	if (entrada == 0 && action_button == 1){
-		cant_posiciones = 0;
+	if (entrada == 0 && action_button == 1){ // Ejecutar solo si se entró por primera vez y se activó el botón
+		cant_posiciones = 0; //Reinicia variable para saber cuantas posiciones lleva guardadas
 	}
 
-	if (action_button == 1 && cant_posiciones < NUM_MAX_PASOS) {
+	if (action_button == 1 && cant_posiciones < NUM_MAX_PASOS) { // Si se activa el botón y las posiciones son menores a las indicadas, seguir guardando
+		// Parpadeo de leds
 		PORTB &= ~(1 << PORTB3);
 		_delay_ms(3);
 		PORTB |= (1 << PORTB3);
-
+		
+		//Guardar en la EPROM el valor del OCR, aumenta la dirección para guardar la siguiente posición
 		writeEPROM(OCR1A, save_temporal++);
 		writeEPROM(OCR1B, save_temporal++);
 		writeEPROM(OCR0A, save_temporal++);
 		writeEPROM(OCR0B, save_temporal++);
-		entrada = 1;
-		action_button = 0;
-		cant_posiciones++;
+		entrada = 1; //Se coloca en 1 para que no reinicie a la dirección 0
+		action_button = 0; // Se apaga el botón de acción
+		cant_posiciones++; // Aumento posiciones
 	}
 }
 
 
 void reproducir_data() {
+	//Mostrar en los leds el modo actual
 	PORTB |= (1 << PORTB4);
 	PORTB &= ~(1 << PORTB3);
 	entrada = 0;
 
+	
 	if (!modo_repro_iniciado && action_button == 1) {
+		//Reinicio valores
 		addr = 0;
-		pasos = 0;
+		pasos = 0; 
 		modo_repro_iniciado = 1;
-		action_button = 0; // Consumir el botón
+		action_button = 0;
 	}
 
 	// Ejecutar solo si se inició el modo de reproducción
-	if (modo_repro_iniciado) {
-		if (pasos < cant_posiciones) {
+	if (modo_repro_iniciado == 1) {
+		if (pasos < cant_posiciones) { //Compara para reproducir unicamente la cantidad de posiciones guardadas
 			OCR1A = readEPROM(addr++);
 			OCR1B = readEPROM(addr++);
 			OCR0A = readEPROM(addr++);
 			OCR0B = readEPROM(addr++);
 			
 			pasos++;
-			_delay_ms(100); // Tiempo entre pasos
+			_delay_ms(100); // Tiempo entre posiciones
 			} else {
-			// Se completó la reproducción
-			modo_repro_iniciado = 0;
+			modo_repro_iniciado = 0; // Se completó la reproducción
 		}
 	}
 }
@@ -184,11 +184,11 @@ void reproducir_data() {
 
 void escribir_angulo(){
 	PORTB |= (1 << PORTB3) | (1 << PORTB4); // Ambos LEDs
+	//Reinicio variables de otros modos (redundante)
 	pasos= 0;
 	entrada = 0;
 	save_temporal = 0;
 	addr = 0;
-	
 	modo_repro_iniciado = 0;
 	
 }
@@ -199,18 +199,18 @@ void escribir_angulo(){
 ISR(ADC_vect) {
 	if (modo != 1) return;
 
-	uint8_t adc_channel = ADMUX & 0x0F;
-	uint8_t adc_value = ADCH; // Valor ADC de 8 bits (0-255)
+	multiplexar_ADC = ADMUX & 0x0F;
+	ADC_value = ADCH; // Valor ADC de 8 bits
 	uint8_t angle;
 	
-	// Canal ADC4 requiere inversión del valor
-	if (adc_channel == 4) {
-		adc_value = 255 - adc_value;
+	// Canal ADC4 invertir valor debido a la conexión física
+	if (multiplexar_ADC == 4) {
+		ADC_value = 255 - ADC_value;
 	}
 
-	// Escalar el rango útil del potenciómetro (0-127) -> 0-180° del servo
-	if (adc_value <= 127) {
-		angle = (adc_value * 180UL) / 127;
+	// Escalar el rango útil del potenciómetro (0-127 la mitad) -> 0-180° del servo
+	if (ADC_value <= 127) {
+		angle = (ADC_value * 180UL) / 127;
 		} else {
 		angle = 180;
 	}
@@ -218,11 +218,11 @@ ISR(ADC_vect) {
 	// Calcular el pulso PWM para el servo
 	uint16_t servo_pulse;
 
-	switch(adc_channel) {
+	switch(multiplexar_ADC) {
 		case 3: // Canal ADC3 -> Servo 1
 		servo_pulse = SERVO_MIN + (angle * (SERVO_MAX - SERVO_MIN)) / 180;
 		OCR1B = (uint16_t)servo_pulse;
-		ADMUX = (ADMUX & 0xF0) | 4;
+		ADMUX = (ADMUX & 0xF0) | 4; // Pasar al sigueinte ADC
 		break;
 
 		case 4: // Canal ADC4 -> Servo 2 (inversión aplicada arriba)
@@ -240,7 +240,7 @@ ISR(ADC_vect) {
 		case 6: // Canal ADC6 -> Servo 4
 		servo_pulse = SERVO_MIN_4 + (angle * (SERVO_MAX_4 - SERVO_MIN_4)) / 180;
 		OCR0B = (uint16_t)servo_pulse;
-		ADMUX = (ADMUX & 0xF0) | 3;
+		ADMUX = (ADMUX & 0xF0) | 3; // Regresar al primer ADC (ADC3)
 		break;
 	}
 
