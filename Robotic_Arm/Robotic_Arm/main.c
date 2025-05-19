@@ -179,6 +179,8 @@ void manual(){
 		entrada = 1; //Se coloca en 1 para que no reinicie a la dirección 0
 		action_button = 0; // Se apaga el botón de acción
 		cant_posiciones++; // Aumento posiciones
+	} else if (action_button == 1 && cant_posiciones >= NUM_MAX_PASOS){
+		action_button = 0;
 	}
 }
 
