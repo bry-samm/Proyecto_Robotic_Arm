@@ -10,8 +10,8 @@ from Adafruit_IO import Client, Feed
 run_count = 0
 
 # Usuario y clave para conectarse a la cuenta de Adafruit IO
-ADAFRUIT_IO_USERNAME = "bry_samm"
-ADAFRUIT_IO_KEY = "aio_uXza63re3gKg3xNw8czW6cRQ5DUq"
+ADAFRUIT_IO_USERNAME = 
+ADAFRUIT_IO_KEY = 
 
 # Abrimos la conexión con el Arduino usando el puerto COM10
 com_arduino = serial.Serial(port='COM10', baudrate=9600, timeout=0.1)
